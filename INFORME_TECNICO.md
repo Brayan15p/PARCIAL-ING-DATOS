@@ -11,8 +11,8 @@
 | **Dataset** | Brazilian E-Commerce Public Dataset by Olist (Kaggle) |
 | **Empresa ficticia** | DataMarket Analytics |
 | **Período analizado** | Septiembre 2016 — Octubre 2018 |
-| **Herramientas** | Python 3.10, Pandas, PySpark, SQLite, Plotly, Seaborn |
-| **Arquitectura** | Pipeline ETL medallón: Bronze → Silver → Gold |
+| **Herramientas** | Python 3.10, Pandas, PySpark, SQLite, Neon PostgreSQL, Plotly, Seaborn |
+| **Arquitectura** | Pipeline ETL medallón: Bronze → Silver → Gold + Cloud DB |
 
 ---
 
@@ -338,9 +338,40 @@ def run_pipeline() -> None:
 |---|---|---|---|
 | **Parquet (Snappy)** | `master_ecommerce.parquet` | Análisis en Pandas/Spark | Columnar, comprimido, 3-5x más rápido que CSV |
 | **Parquet (Snappy)** | `{tabla}_clean.parquet` | Reload rápido por tabla | Preserva tipos de datos exactos |
-| **SQLite** | `olist_ecommerce.db` | Consultas SQL, Power BI | Estándar SQL, portátil, sin servidor |
+| **SQLite** | `olist_ecommerce.db` | Consultas SQL locales | Estándar SQL, portátil, sin servidor |
+| **Neon PostgreSQL** | `olist.*` (cloud) | Base de datos producción | Cloud, multi-usuario, Power BI, APIs |
 | **CSV** | `powerbi_*.csv` | Power BI Desktop | Compatible con cualquier herramienta BI |
 | **PNG** | `data/exports/*.png` | Presentación, informe | Visualizaciones listas para usar |
+
+### 6.5 Neon PostgreSQL — Base de Datos Cloud
+
+El pipeline sube el dataset completo a **Neon** (PostgreSQL serverless en `sa-east-1`), creando un schema `olist` con 9 tablas e índices:
+
+```
+olist.orders          99,441 filas
+olist.customers       96,096 filas
+olist.order_items    112,647 filas
+olist.payments       103,886 filas
+olist.reviews         99,056 filas
+olist.products        32,951 filas
+olist.sellers          3,095 filas
+olist.master          99,441 filas  ← dataset gold completo
+olist.rfm_segmentos   96,096 filas  ← segmentación RFM
+```
+
+Consulta de ejemplo con window functions de PostgreSQL (no disponible en SQLite):
+
+```sql
+SELECT customer_state,
+       COUNT(*)                                        AS ordenes,
+       RANK() OVER (ORDER BY COUNT(*) DESC)            AS ranking,
+       ROUND(100.0 * SUM(CASE WHEN entrega_a_tiempo
+             THEN 1 ELSE 0 END) / COUNT(*), 1)         AS pct_puntual
+FROM olist.master
+WHERE order_status = 'delivered'
+GROUP BY customer_state
+ORDER BY ordenes DESC;
+```
 
 ### 6.3 Verificación de integridad (Round-trip testing)
 
